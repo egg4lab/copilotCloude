@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photo Merge 照片合併</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 2rem 1rem;
+            display: flex;
+            justify-content: center;
+            min-height: 100vh;
+            box-sizing: border-box;
+            background: radial-gradient(circle, #1a1a2e, #16213e, #0f3460);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: white;
+            text-align: center;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 2rem;
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            width: 100%;
+            max-width: 720px;
+        }
+
+        h1 {
+            font-size: 2.2rem;
+            margin: 0 0 0.5rem;
+            background: linear-gradient(to right, #ffd700, #ffae00);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        p.hint {
+            color: #e0e0e0;
+            margin-top: 0;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            margin: 1.2rem 0;
+        }
+
+        button, label.file-btn {
+            cursor: pointer;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            background: rgba(255, 255, 255, 0.15);
+            color: white;
+            padding: 10px 18px;
+            border-radius: 10px;
+            font-size: 1rem;
+            transition: background 0.2s, transform 0.1s;
+        }
+
+        button:hover, label.file-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        button:active, label.file-btn:active {
+            transform: scale(0.97);
+        }
+
+        button.primary {
+            background: linear-gradient(to right, #ffd700, #ffae00);
+            color: #1a1a2e;
+            font-weight: bold;
+            border: none;
+        }
+
+        button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        button.layout.active {
+            background: rgba(255, 215, 0, 0.35);
+            border-color: #ffd700;
+        }
+
+        input[type="file"] { display: none; }
+
+        #thumbs {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: center;
+            margin: 1rem 0;
+        }
+
+        #thumbs .thumb {
+            position: relative;
+        }
+
+        #thumbs img {
+            width: 90px;
+            height: 90px;
+            object-fit: cover;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        #thumbs .remove {
+            position: absolute;
+            top: -6px;
+            right: -6px;
+            width: 22px;
+            height: 22px;
+            padding: 0;
+            border-radius: 50%;
+            background: #ff4d4d;
+            border: none;
+            font-size: 0.8rem;
+            line-height: 22px;
+        }
+
+        #result-wrap {
+            margin-top: 1rem;
+            display: none;
+        }
+
+        #result {
+            max-width: 100%;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h1>Photo Merge 照片合併</h1>
+        <p class="hint">Pick two or more photos, choose a layout, and merge them into one image.<br>選擇多張照片，挑一個排版，合併成一張圖片。</p>
+
+        <div class="controls">
+            <label class="file-btn">📷 Add Photos 加照片
+                <input type="file" id="file-input" accept="image/*" multiple>
+            </label>
+            <button id="clear-btn">🗑 Clear 清除</button>
+        </div>
+
+        <div class="controls">
+            <button class="layout active" data-layout="horizontal">↔ Horizontal 橫向</button>
+            <button class="layout" data-layout="vertical">↕ Vertical 直向</button>
+            <button class="layout" data-layout="grid">▦ Grid 網格</button>
+        </div>
+
+        <div class="controls">
+            <button id="merge-btn" class="primary" disabled>✨ Merge 合併</button>
+            <button id="download-btn" disabled>⬇ Download 下載</button>
+        </div>
+
+        <div id="thumbs"></div>
+
+        <div id="result-wrap">
+            <canvas id="result"></canvas>
+        </div>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('file-input');
+        const thumbs = document.getElementById('thumbs');
+        const mergeBtn = document.getElementById('merge-btn');
+        const downloadBtn = document.getElementById('download-btn');
+        const clearBtn = document.getElementById('clear-btn');
+        const canvas = document.getElementById('result');
+        const resultWrap = document.getElementById('result-wrap');
+
+        const images = [];
+        let layout = 'horizontal';
+        const GAP = 10;
+        const CELL = 800; // target size per photo along its scaled edge
+
+        document.querySelectorAll('button.layout').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('button.layout').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                layout = btn.dataset.layout;
+                if (images.length >= 2) merge();
+            });
+        });
+
+        fileInput.addEventListener('change', () => {
+            for (const file of fileInput.files) {
+                const url = URL.createObjectURL(file);
+                const img = new Image();
+                img.onload = () => {
+                    images.push(img);
+                    addThumb(img);
+                    updateButtons();
+                };
+                img.src = url;
+            }
+            fileInput.value = '';
+        });
+
+        function addThumb(img) {
+            const wrap = document.createElement('div');
+            wrap.className = 'thumb';
+            const preview = document.createElement('img');
+            preview.src = img.src;
+            const remove = document.createElement('button');
+            remove.className = 'remove';
+            remove.textContent = '✕';
+            remove.addEventListener('click', () => {
+                images.splice(images.indexOf(img), 1);
+                wrap.remove();
+                updateButtons();
+                if (images.length < 2) hideResult();
+            });
+            wrap.append(preview, remove);
+            thumbs.appendChild(wrap);
+        }
+
+        clearBtn.addEventListener('click', () => {
+            images.length = 0;
+            thumbs.innerHTML = '';
+            hideResult();
+            updateButtons();
+        });
+
+        function updateButtons() {
+            mergeBtn.disabled = images.length < 2;
+        }
+
+        function hideResult() {
+            resultWrap.style.display = 'none';
+            downloadBtn.disabled = true;
+        }
+
+        mergeBtn.addEventListener('click', merge);
+
+        function merge() {
+            const ctx = canvas.getContext('2d');
+            if (layout === 'horizontal') {
+                // Scale every photo to the same height, place side by side
+                const h = CELL;
+                const widths = images.map(img => img.width * h / img.height);
+                canvas.width = widths.reduce((a, b) => a + b, 0) + GAP * (images.length - 1);
+                canvas.height = h;
+                fillBackground(ctx);
+                let x = 0;
+                images.forEach((img, i) => {
+                    ctx.drawImage(img, x, 0, widths[i], h);
+                    x += widths[i] + GAP;
+                });
+            } else if (layout === 'vertical') {
+                // Scale every photo to the same width, stack top to bottom
+                const w = CELL;
+                const heights = images.map(img => img.height * w / img.width);
+                canvas.width = w;
+                canvas.height = heights.reduce((a, b) => a + b, 0) + GAP * (images.length - 1);
+                fillBackground(ctx);
+                let y = 0;
+                images.forEach((img, i) => {
+                    ctx.drawImage(img, 0, y, w, heights[i]);
+                    y += heights[i] + GAP;
+                });
+            } else {
+                // Grid: square cells, photos center-cropped to fill
+                const cols = Math.ceil(Math.sqrt(images.length));
+                const rows = Math.ceil(images.length / cols);
+                const cell = CELL;
+                canvas.width = cols * cell + GAP * (cols - 1);
+                canvas.height = rows * cell + GAP * (rows - 1);
+                fillBackground(ctx);
+                images.forEach((img, i) => {
+                    const col = i % cols;
+                    const row = Math.floor(i / cols);
+                    const x = col * (cell + GAP);
+                    const y = row * (cell + GAP);
+                    // center-crop source to a square
+                    const side = Math.min(img.width, img.height);
+                    const sx = (img.width - side) / 2;
+                    const sy = (img.height - side) / 2;
+                    ctx.drawImage(img, sx, sy, side, side, x, y, cell, cell);
+                });
+            }
+            resultWrap.style.display = 'block';
+            downloadBtn.disabled = false;
+        }
+
+        function fillBackground(ctx) {
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        downloadBtn.addEventListener('click', () => {
+            const link = document.createElement('a');
+            link.download = 'merged-photo.png';
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        });
+    </script>
+</body>
+</html>
